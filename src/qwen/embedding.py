@@ -1,7 +1,9 @@
 import http.client
 import json
 from typing import List, Union
-
+from src.utils.misc import timer
+import logging
+logging.basicConfig(level=logging.INFO)
 
 class EmbeddingClient:
     """
@@ -15,7 +17,7 @@ class EmbeddingClient:
         self.headers = {
             "Content-Type": "application/json"
         }
-
+    @timer(logger=logging.getLogger())
     def embed(self, texts: Union[str, List[str]]):
         """
         发送文本或文本列表到 /qwen3_embedding 接口，返回嵌入向量。
