@@ -3,41 +3,32 @@ from pymilvus import connections, Collection, FieldSchema, CollectionSchema, Dat
 # 1️⃣ 连接 Milvus
 connections.connect(
     alias="default",
-    host="localhost",  # Milvus 服务地址
-    port="19530"       # Milvus 默认端口
+    host="localhost",
+    port="19530"
 )
 
+# 2️⃣ 定义字段
 fields = [
-    FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+    FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),  # 自动ID
     FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=1000),
-    FieldSchema(name="coarse_types", dtype=DataType.VARCHAR, max_length=500),
-    FieldSchema(name="input", dtype=DataType.VARCHAR, max_length=5000),
-    FieldSchema(name="instruction", dtype=DataType.VARCHAR, max_length=5000),
-    FieldSchema(name="output", dtype=DataType.VARCHAR, max_length=5000),
-    FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=4096) # Qwen3-embedding 是 4096 维度
+    FieldSchema(name="sentence", dtype=DataType.VARCHAR, max_length=10000),
+    FieldSchema(name="coarse_types", dtype=DataType.VARCHAR, max_length=2000),   # 可以存 JSON 字符串化后的数组
+    FieldSchema(name="entities", dtype=DataType.VARCHAR, max_length=5000),       # 同样存 JSON 字符串化后的对象数组
+    FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=4096)         # Qwen3 embedding 输出维度
 ]
 
-schema = CollectionSchema(fields, description="NER/RE training samples")
+schema = CollectionSchema(fields, description="NER training data (new format)")
 
-# 2️⃣ 定义 Collection 名称
+# 3️⃣ Collection 名称
 collection_name = "rag_qwen"
 
-# 3️⃣ 检查 Collection 是否存在
+# 4️⃣ 检查 Collection 是否存在
 available_collections = utility.list_collections()
-print(available_collections)
-if collection_name in available_collections:
-    print(f"Collection '{collection_name}' 已存在")
-    collection = Collection(collection_name)  # 可以直接使用已有 
-else:
-    print(f"Collection '{collection_name}' 不存在，正在创建...")
-    collection = Collection(name=collection_name, schema=schema) # 创建
-    print(f"Collection '{collection_name}' 创建成功")
-
-
-
 
 if collection_name in available_collections:
-    print(f"Collection '{collection_name}' 已存在")
-    collection = Collection(collection_name)  # 可以直接使用已有 collection
+    print(f"✅ Collection '{collection_name}' 已存在")
+    collection = Collection(collection_name)
 else:
-    print(f"Collection '{collection_name}' 不存在，正在创建...")
+    print(f"⚙️ Collection '{collection_name}' 不存在，正在创建...")
+    collection = Collection(name=collection_name, schema=schema)
+    print(f"✅ Collection '{collection_name}' 创建成功")
