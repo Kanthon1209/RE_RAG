@@ -41,3 +41,9 @@ class EmbeddingClient:
     def close(self):
         """关闭 HTTP 连接"""
         self.conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
