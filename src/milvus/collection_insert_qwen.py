@@ -15,7 +15,7 @@ connections.connect("default", host="127.0.0.1", port="19530")
 collection = Collection("rag_qwen")
 
 # ===== 2️⃣ 加载数据 =====
-with open("data/train_v3.json", "r", encoding="utf-8") as f:
+with open("data/train_v2.json", "r", encoding="utf-8") as f:
     data = json.load(f)
 print("data length:", len(data))
 
@@ -44,66 +44,56 @@ print(f"▶️ 已有出错批次: {sorted(error_batches)}")
 # ===== 4️⃣ 批次大小 =====
 batch_size = 100  # 每批 100 条
 
-# ===== 5️⃣ 主循环 =====
+# ===== 主循环 =====
 with EmbeddingClient() as client:
     for i in range(start_index, len(data), batch_size):
         batch_num = i // batch_size
         if batch_num in error_batches:
-            print(f"⏩ 跳过已出错批次 {batch_num} (索引 {i}~{i+batch_size-1})")
+            print(f"⏩ 跳过已出错批次 {batch_num}")
             continue
 
         batch = data[i:i + batch_size]
 
-        ids, sources, sentences, coarse_types_list, entities_list, embeddings = [], [], [], [], [], []
-
-        print(f"\n🚀 正在处理第 {batch_num + 1} 批 (索引 {i} ~ {i+len(batch)-1})")
+        ids, sources, sentences, coarse_types_list, entities_list = [], [], [], [], []
+        for j, item in enumerate(batch):
+            idx = i + j
+            sentence = item.get("sentence", "").strip()
+            if not sentence:
+                continue
+            ids.append(idx)
+            sources.append(item.get("source", ""))
+            sentences.append(sentence)
+            coarse_types_list.append(json.dumps(item.get("coarse_types", []), ensure_ascii=False))
+            entities_list.append(json.dumps(item.get("entities", []), ensure_ascii=False))
 
         try:
-            for j, item in enumerate(tqdm(batch)):
-                idx = i + j
-
-                # 防止字段缺失
-                sentence = item.get("sentence", "").strip()
-                if not sentence:
-                    continue
-
-                ids.append(idx)
-                sources.append(item.get("source", ""))
-                sentences.append(sentence)
-                coarse_types_list.append(json.dumps(item.get("coarse_types", []), ensure_ascii=False))
-                entities_list.append(json.dumps(item.get("entities", []), ensure_ascii=False))
-
-                # ===== 生成 embedding =====
-                resp = client.embed(texts=sentence)
-                embeddings.append(resp["embeddings"][0])
+            # 🚀 一次请求多个文本
+            resp = client.embed(sentences)
+            embeddings = resp["embeddings"]
 
             # ===== 插入 Milvus =====
-            if embeddings:
-                collection.insert([
-                    ids,
-                    sources,
-                    sentences,
-                    coarse_types_list,
-                    entities_list,
-                    embeddings
-                ])
+            collection.insert([
+                sources,
+                sentences,
+                coarse_types_list,
+                entities_list,
+                embeddings
+            ])
+            print(f"✅ 成功插入 {len(embeddings)} 条 (索引范围 {i}-{i + len(embeddings) - 1})")
+
+            # 每隔几批再 flush 一次，提高写入效率
+            if batch_num % 10 == 0:
                 collection.flush()
-                print(f"✅ 成功插入 {len(embeddings)} 条 (索引范围 {i}-{i + len(embeddings) - 1})")
-            else:
-                print(f"⚠️ 本批无可插入数据，跳过")
 
             # ===== 更新断点 =====
             with open(checkpoint_path, "w") as f:
                 json.dump({"last_index": i + batch_size}, f)
-            print(f"💾 断点已保存 -> last_index = {i + batch_size}")
-
         except Exception as e:
             print(f"❌ 第 {batch_num} 批处理失败: {e}")
             error_batches.add(batch_num)
             with open(error_batches_path, "w") as f:
                 json.dump(sorted(list(error_batches)), f)
-            print(f"⚠️ 已记录出错批次 {batch_num}, 下一次可重新处理")
-            continue
+
 
 print("\n🎉 全部处理完成！")
 print(f"⚠️ 还有出错批次未处理: {sorted(error_batches)}")
