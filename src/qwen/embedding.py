@@ -1,46 +1,75 @@
 import http.client
 import json
-from typing import List, Union
-from src.utils.misc import timer
 import logging
-logging.basicConfig(level=logging.INFO)
+from typing import Union, List
 
 class EmbeddingClient:
     """
     用于请求本地 Qwen3 Embedding FastAPI 服务的客户端。
+    支持持久连接（HTTP Keep-Alive）与自动重连。
     """
 
     def __init__(self, host: str = "127.0.0.1", port: int = 12138):
         self.host = host
         self.port = port
-        self.conn = http.client.HTTPConnection(self.host, self.port)
-        self.headers = {
-            "Content-Type": "application/json"
-        }
-    @timer(logger=logging.getLogger())
+        self.conn = None
+        # self.headers = {
+        #     "Content-Type": "application/json",
+        #     "Connection": "keep-alive"   # 👈 告诉服务器保持连接
+        # }
+        self.headers = {"Content-Type": "application/json"} # 持久连接和 FastAPI 放到一起会出问题, 有空看一下错误的原因
+        self.logger = logging.getLogger(__name__)
+        self._connect()
+
+    def _connect(self):
+        """建立 HTTP 连接"""
+        if self.conn:
+            try:
+                self.conn.close()
+            except:
+                pass
+        self.conn = http.client.HTTPConnection(self.host, self.port, timeout=60)
+        self.logger.info(f"[EmbeddingClient] Connected to {self.host}:{self.port}")
+
+    def _reconnect(self):
+        """自动重连"""
+        self.logger.warning("[EmbeddingClient] Connection lost, reconnecting...")
+        self._connect()
+
     def embed(self, texts: Union[str, List[str]]):
         """
         发送文本或文本列表到 /qwen3_embedding 接口，返回嵌入向量。
         """
-        # 统一成列表
         if isinstance(texts, str):
             texts = [texts]
 
         payload = json.dumps({"texts": texts})
+
         try:
             self.conn.request("POST", "/qwen3_embedding", body=payload, headers=self.headers)
             res = self.conn.getresponse()
             data = res.read()
+
             if res.status != 200:
-                raise Exception(f"Server returned status {res.status}: {data.decode('utf-8')}")
+                raise Exception(f"Server returned {res.status}: {data.decode('utf-8')}")
+
             return json.loads(data.decode("utf-8"))
+
+        except (http.client.RemoteDisconnected, ConnectionResetError, BrokenPipeError) as e:
+            # 连接断开时自动重连并重试
+            self.logger.warning(f"[EmbeddingClient] Lost connection: {e}, reconnecting...")
+            self._reconnect()
+            return self.embed(texts)
+
         except Exception as e:
-            print(f"[EmbeddingClient Error] {e}")
+            self.logger.error(f"[EmbeddingClient Error] {e}")
             return None
 
     def close(self):
         """关闭 HTTP 连接"""
-        self.conn.close()
+        if self.conn:
+            self.conn.close()
+            self.logger.info("[EmbeddingClient] Connection closed.")
 
     def __enter__(self):
         return self
