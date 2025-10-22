@@ -9,7 +9,7 @@ import json
 
 from src.qwen.embedding import EmbeddingClient
 from src.utils.misc import timer
-
+from rapidfuzz import fuzz
 
 
 collection_name = "rag_qwen"
@@ -50,7 +50,7 @@ def compute_entity_overlap_score(test_coarse_types: list[str], train_entities: l
     n_in = len(train_set & test_set)
     n_out = len(train_set - test_set)
     
-    score = (n_in - n_out) / len(train_set)  # [-1,1]
+    score = (n_in - n_out) / len(test_set)  # [-1,1] # 改成了 test_set
     return score
 
 def compute_entity_name_match_score(test_sentence: str, train_entities: list[dict]) -> float:
@@ -63,7 +63,7 @@ def compute_entity_name_match_score(test_sentence: str, train_entities: list[dic
     if not train_entities:
         return 0.0
 
-    sentence = test_sentence.lower()
+    sentence = test_sentence.lower() # 不会对中文造成影响
     total = len(train_entities)
     score_sum = 0.0
 
@@ -71,22 +71,15 @@ def compute_entity_name_match_score(test_sentence: str, train_entities: list[dic
         name = ent.get("name", "").strip().lower()
         if not name:
             continue
-
         if name in sentence:
-            s = 1.0  # 完全匹配
+            score_sum += 1
         else:
-            # 部分匹配判断
-            ratio = SequenceMatcher(None, name, sentence).ratio()
-            if ratio > 0.6:
-                s = 0.5 * ratio  # 部分匹配
-            else:
-                s = -0.5  # 缺失惩罚
+            score = fuzz.partial_ratio(name, sentence) / 100  # 转成 [0, 1]
+            score_sum += score
 
-        score_sum += s
-
-    final_score = score_sum / total
+    final_score = score_sum# 需要平均
     # 归一化到 [-1, 1]
-    return max(min(final_score, 1.0), -1.0)
+    return final_score
 
 
 # ===== 3️⃣ 定义 POST 接口 =====
@@ -100,7 +93,7 @@ async def search_items(request: Request):
 
     # 提取请求字段
     query_text = body.get("sentence", None)
-    limit = body.get("limit", 10)
+    limit = body.get("limit", 50)
     test_coarse_types: list[str] = body.get("coarse_types", [])
     # TODO: 以测试样本 coarse_types 字段为依据, 每一个 type 从训练集中找一个符合的训练样本供给参考
 
@@ -153,13 +146,16 @@ async def search_items(request: Request):
                 d["entities"] = json.loads(d["entities"])
                 if test_coarse_types:
                     overlap_score = compute_entity_overlap_score(test_coarse_types, d["entities"])
-                    d['overlap_score'] = overlap_score
+                    d['coarse_types_overlap_score'] = overlap_score
                 else:
-                    d['overlap_score'] = 0
+                    d['coarse_types_overlap_score'] = 0
+                entity_name_match_score = compute_entity_name_match_score(query_text, d["entities"])
+                d['entity_name_match_score'] = entity_name_match_score
+                d['mix_score'] = (d['entity_name_match_score'] + 0.1) * (d['coarse_types_overlap_score'] + 0.1)
             hits_list.append(d)
 
     # 根据度量类型来
-    hits_list.sort(key=lambda x: (-x['overlap_score'], -x['score'])) # 按照 overlap_score 先排序, 后 score 排序
+    hits_list.sort(key=lambda x: (-x['mix_score'])) # 按照 overlap_score 先排序, 后 score 排序
     end_time = time.time()
     return JSONResponse(
             {
