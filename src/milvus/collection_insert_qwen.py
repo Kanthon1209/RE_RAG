@@ -12,10 +12,10 @@ import debugpy
 
 # ===== 1️⃣ 连接到 Milvus =====
 connections.connect("default", host="127.0.0.1", port="19530")
-collection = Collection("rag_qwen")
+collection = Collection("rag_qwen_origin")
 
 # ===== 2️⃣ 加载数据 =====
-with open("data/train_v2.json", "r", encoding="utf-8") as f:
+with open("data/train_origin.json", "r", encoding="utf-8") as f:
     data = json.load(f)
 print("data length:", len(data))
 
@@ -63,8 +63,8 @@ with EmbeddingClient() as client:
             ids.append(idx)
             sources.append(item.get("source", ""))
             sentences.append(sentence)
-            coarse_types_list.append(json.dumps(item.get("coarse_types", []), ensure_ascii=False))
-            entities_list.append(json.dumps(item.get("entities", []), ensure_ascii=False))
+            coarse_types_list.append(item.get("coarse_types", []))
+            entities_list.append(item.get("entities", []))
 
         try:
             # 🚀 一次请求多个文本

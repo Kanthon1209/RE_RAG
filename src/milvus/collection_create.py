@@ -20,7 +20,7 @@ fields = [
 schema = CollectionSchema(fields, description="NER training data (new format) field coarse_types entities set to DataType.JSON")
 
 # 3️⃣ Collection 名称
-collection_name = "rag_qwen_json"
+collection_name = "rag_qwen_origin"
 # 4️⃣ 检查 Collection 是否存在
 available_collections = utility.list_collections()
 
