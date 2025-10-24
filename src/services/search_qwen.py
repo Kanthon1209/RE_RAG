@@ -14,6 +14,7 @@ from src.services.postprocess.rerank import compute_entity_name_match_score, com
 collection_name = "rag_qwen"            # 没有用 JSON 字段的 数据库 (过滤过的)
 collection_v2_name = "rag_qwen_json"    # 用了 JSON 字段的数据库 (过滤过的)
 collection_v3_name = "rag_qwen_origin"  # 用了 JSON 字段的数据库, 没有经过过滤, 用的原始的训练样本
+collection_v4_name = "rag_qwen_v4"  # 用了 JSON 字段的数据库, 没有经过过滤, 用的原始的训练样本
 global_counter = 0
 
 app = FastAPI()
@@ -28,6 +29,8 @@ collection_v2 = Collection(collection_v2_name)
 collection_v2.load() # 加载集合到内存
 collection_v3 = Collection(collection_v3_name)
 collection_v3.load() # 加载集合到内存
+collection_v4 = Collection(collection_v4_name)
+collection_v4.load() # 加载集合到内存
 
 @timer(logger=logger)
 def create_embedding(query_text: str) -> list[float]:
@@ -214,7 +217,10 @@ async def search_v3(request: Request):
     # 提取请求字段
     query_text = body.get("sentence", None)
     limit = body.get("limit", 50)
-    method = body.get("method", 50)
+    methods = ['default', "mix"]
+    method = body.get("method", "default")
+    if method not in methods:
+        return JSONResponse({"error": f"wrong method, method should be in {methods}"}, status_code=400)
 
     test_coarse_types: list[str] = body.get("coarse_types", [])
     # TODO: 以测试样本 coarse_types 字段为依据, 每一个 type 从训练集中找一个符合的训练样本供给参考
@@ -271,7 +277,8 @@ async def search_v3(request: Request):
             hits_list.append(d)
 
     # 根据度量类型来
-    hits_list.sort(key=lambda x: (-x['mix_score'])) # 按照 overlap_score 先排序, 后 score 排序
+    if method == 'mix':
+        hits_list.sort(key=lambda x: (-x['mix_score'])) # 按照 overlap_score 先排序, 后 score 排序
     end_time = time.time()
     return JSONResponse(
             {
@@ -279,3 +286,44 @@ async def search_v3(request: Request):
                 "info": "version 2.0",
                 "cost_time": f"{end_time - start_time:.4f}s"
             }, status_code=200)
+
+
+def select_train_samples_by_coarse_type(coarse_types: list[str]) -> list[dict]:
+    expr_parts = [f'coarse_type_set like "%{ctype}%"' for ctype in coarse_types]
+    expr = " or ".join(expr_parts)
+    filtered_results: list = collection_v4.query(
+        expr=expr,
+        output_fields=["id", "entities", "coarse_type_set", "sentence"]
+    )
+    for item in filtered_results:
+        item_coarse_count = 0
+        for cs_type in item['coarse_type_set'].split(','):
+            if cs_type in coarse_types:
+                item_coarse_count += 1
+        item['coarse_count'] = item_coarse_count
+
+    filtered_results.sort(key= lambda item: -item['coarse_count'])
+
+    rt_list = []
+    for datum in filtered_results:
+        if len(coarse_types) == 0:
+            break
+        modified_flag = False
+        for c_type in datum['coarse_type_set'].split(','):
+            if c_type in coarse_types:
+                coarse_types.remove(c_type)
+                modified_flag = True
+        if modified_flag:
+            rt_list.append(datum)
+    return JSONResponse({"data": rt_list})
+
+# ======================
+# 5️⃣ API 接口
+# ======================
+@app.post("/select_samples")
+async def api_select_samples(request: Request):
+    body = await request.json()
+    test_coarse_types = body.get("coarse_type", None)
+    if test_coarse_types is None:
+        return JSONResponse({"error": "no test sample coarse_type"})
+    return select_train_samples_by_coarse_type(test_coarse_types)
