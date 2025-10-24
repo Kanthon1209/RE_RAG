@@ -1,0 +1,1 @@
+from src.milvus import collection_index
