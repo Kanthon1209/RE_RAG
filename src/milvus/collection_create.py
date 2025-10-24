@@ -17,7 +17,7 @@ fields = [
     FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=4096)         # Qwen3 embedding 输出维度
 ]
 
-schema = CollectionSchema(fields, description="NER training data (new format)")
+schema = CollectionSchema(fields, description="NER training data (new format) field coarse_types entities set to DataType.JSON")
 
 # 3️⃣ Collection 名称
 collection_name = "rag_qwen_json"
