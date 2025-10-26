@@ -2,7 +2,7 @@ import json
 import os
 from tqdm import tqdm
 from pymilvus import connections, Collection
-from src.qwen.embedding import EmbeddingClient
+from src.qwen.remote_services import Client
 import debugpy
 
 # # ===== Debug 监听 =====
@@ -45,7 +45,7 @@ print(f"▶️ 已有出错批次: {sorted(error_batches)}")
 batch_size = 100  # 每批 100 条
 
 # ===== 主循环 =====
-with EmbeddingClient() as client:
+with Client() as client:
     for i in range(start_index, len(data), batch_size):
         batch_num = i // batch_size
         if batch_num in error_batches:
