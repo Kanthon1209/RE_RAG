@@ -2,3 +2,5 @@
 *.json
 *.ipynb
 *tempCodeRunner*.py
+test.py
+test.ipynb
