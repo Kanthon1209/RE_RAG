@@ -8,7 +8,7 @@ connections.connect(
 )
 
 
-collection_name = "rag_qwen_v4"
+collection_name = "rag_qwen_v5"
 fields = [
     FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
     FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=1000),
@@ -19,6 +19,6 @@ fields = [
     FieldSchema(name="coarse_type_set", dtype=DataType.VARCHAR, max_length=2000)  # 新增字段
 ]
 
-schema = CollectionSchema(fields, description="NER training data with coarse_type_set")
+schema = CollectionSchema(fields, description="NER training data with coarse_type_set, train set fixed")
 new_collection = Collection(collection_name, schema=schema)
 print(f'Collection {collection_name} created')
