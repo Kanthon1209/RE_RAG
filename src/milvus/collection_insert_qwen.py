@@ -12,10 +12,10 @@ import debugpy
 
 # ===== 1️⃣ 连接到 Milvus =====
 connections.connect("default", host="127.0.0.1", port="19530")
-collection = Collection("rag_qwen_origin")
+collection = Collection("rag_qwen_v5")
 
 # ===== 2️⃣ 加载数据 =====
-with open("data/train_origin.json", "r", encoding="utf-8") as f:
+with open("data/train_origin_fixed.json", "r", encoding="utf-8") as f:
     data = json.load(f)
 print("data length:", len(data))
 
@@ -42,7 +42,7 @@ print(f"▶️ 从第 {start_index} 条开始处理")
 print(f"▶️ 已有出错批次: {sorted(error_batches)}")
 
 # ===== 4️⃣ 批次大小 =====
-batch_size = 100  # 每批 100 条
+batch_size = 100 # 每批 100 条
 
 # ===== 主循环 =====
 with Client() as client:
@@ -54,7 +54,7 @@ with Client() as client:
 
         batch = data[i:i + batch_size]
 
-        ids, sources, sentences, coarse_types_list, entities_list = [], [], [], [], []
+        ids, sources, sentences, coarse_types_list, entities_list, coarse_type_set_list = [], [], [], [], [], []
         for j, item in enumerate(batch):
             idx = i + j
             sentence = item.get("sentence", "").strip()
@@ -65,11 +65,13 @@ with Client() as client:
             sentences.append(sentence)
             coarse_types_list.append(item.get("coarse_types", []))
             entities_list.append(item.get("entities", []))
+            coarse_type_set_list.append(','.join(set(x['coarse_type'] for x in item.get("entities", []))))
 
         try:
             # 🚀 一次请求多个文本
             resp = client.embed(sentences)
             embeddings = resp["embeddings"]
+            print(resp['cost'])
 
             # ===== 插入 Milvus =====
             collection.insert([
@@ -77,7 +79,8 @@ with Client() as client:
                 sentences,
                 coarse_types_list,
                 entities_list,
-                embeddings
+                embeddings,
+                coarse_type_set_list
             ])
             print(f"✅ 成功插入 {len(embeddings)} 条 (索引范围 {i}-{i + len(embeddings) - 1})")
 
