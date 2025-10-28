@@ -4,24 +4,65 @@ from rapidfuzz import fuzz
 def compute_entity_overlap_score(test_coarse_types: list[str], train_entities: list[dict]) -> float:
     """
     计算训练样本 entities 的 coarse_type 与测试样本 coarse_types 的 overlap score
-    - 在测试 sample 内的类型加分
-    - 在测试 sample 外的类型扣分
-    - 返回范围 [-1, 1]
+    - 完全命中 +1
+    - 映射命中 +0.5
+    - 不命中 0
+    - 同一 coarse_type 不重复加分
+    - 最终得分范围 [0, 1]
     """
+    COARSE_TYPE_MAP = {
+        "person": ["person", "人"],
+        "人": ["person", "人"],
+        "politics": ["politics", "政治"],
+        "政治": ["politics", "政治"],
+        "location": ["location", "位置"],
+        "位置": ["location", "位置"],
+        "literature": ["literature", "文学"],
+        "文学": ["literature", "文学"],
+        "product": ["product", "产品"],
+        "产品": ["product", "产品"],
+        "computer science": ["computer science", "计算机科学", "science"],
+        "计算机科学": ["computer science", "计算机科学", "science"],
+        "music": ["music", "音乐"],
+        "音乐": ["music", "音乐"],
+        "science": ["science", "科学", "biology"],
+        "科学": ["science", "科学", "biology"],
+        "event": ["event", "事件"],
+        "事件": ["event", "事件"],
+        "organisation": ["organisation", "organization", "组织", "组织机构"],
+        "组织": ["organisation", "organization", "组织", "组织机构"],
+        "medicine": ["medicine", "医学"],
+        "医学": ["medicine", "医学"]
+    }
+
     if not train_entities:
         return 0.0
-    
-    test_set = set(test_coarse_types)
-    train_set = set(e.get("coarse_type") for e in train_entities if "coarse_type" in e)
-    
-    if not train_set:
-        return 0.0
 
-    n_in = len(train_set & test_set)
-    n_out = len(train_set - test_set)
-    
-    score = (n_in - n_out) / len(test_set)  # [-1,1] # 改成了 test_set
-    return score
+    test_set = set(test_coarse_types)
+    train_set = {e.get("coarse_type") for e in train_entities if "coarse_type" in e and e["coarse_type"]}
+
+    score = 0.0
+    matched_train_types = set()  # 防止重复加分
+
+    for t_type in train_set:
+        if t_type in matched_train_types:
+            continue  # 跳过重复类型
+        # 完全命中
+        if t_type in test_set:
+            score += 1.0
+            matched_train_types.add(t_type)
+        else:
+            # 映射命中
+            for test_type in test_set:
+                mapped = COARSE_TYPE_MAP.get(test_type, [])
+                if t_type in mapped:
+                    score += 0.5
+                    matched_train_types.add(t_type)
+                    break  # 只加一次分
+
+    # 归一化
+    return min(score / len(test_set), 1.0)
+
 
 def compute_entity_name_match_score(test_sentence: str, train_entities: list[dict]) -> float:
     """
