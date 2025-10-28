@@ -11,10 +11,7 @@ from src.qwen.remote_services import Client
 from src.utils.misc import timer
 from src.services.postprocess.rerank import compute_entity_name_match_score, compute_entity_overlap_score
 
-collection_name = "rag_qwen"            # 没用 JSON 字段的 数据库 (过滤过的)
-collection_v2_name = "rag_qwen_json"    # 用了 JSON 字段的数据库 (过滤过的)
-collection_v3_name = "rag_qwen_origin"  # 用了 JSON 字段的数据库, 没有经过过滤, 用的原始的训练样本
-collection_v4_name = "rag_qwen_v4"      # 用了 JSON 字段的数据库, 没有经过过滤, 用的原始的训练样本
+
 
 app = FastAPI()
 logger = logging.getLogger("app")
@@ -22,14 +19,8 @@ client = Client()
 
 # ===== 1️⃣ 初始化 Milvus 连接 =====
 connections.connect("default", host="127.0.0.1", port="19530")
-collection = Collection(collection_name)
-collection.load() # 加载集合到内存
-collection_v2 = Collection(collection_v2_name)
-collection_v2.load() # 加载集合到内存
-collection_v3 = Collection(collection_v3_name)
-collection_v3.load() # 加载集合到内存
-collection_v4 = Collection(collection_v4_name)
-collection_v4.load() # 加载集合到内存
+collection = Collection('rag_qwen_v5')
+collection.load()
 
 @timer(logger=logger)
 def create_embedding(query_text: str) -> list[float]:
@@ -104,7 +95,7 @@ async def search_v3(request: Request):
         }
         
         try:
-            results = collection_v3.search(
+            results = collection.search(
                 data=[query_vector],
                 anns_field="embedding",
                 param=search_params,
@@ -148,7 +139,7 @@ async def search_v3(request: Request):
                 "rerank-8b": "Qwen3-Reranker-8B",
             }
             model_name = method_model_map[method]
-            reranked_scores = rerank(query=query_text, docs=[item['sentence'] for item in hits_list], model_name=model_name)['scores']
+            reranked_scores = rerank(query=query_text, docs=[json.dumps({"sentence": item['sentence'], "entities": item["entities"]}) for item in hits_list], model_name=model_name)
             for idx, item in enumerate(hits_list):
                 item['rerank_score'] = reranked_scores[idx]
             hits_list.sort(key = lambda x: -x["rerank_score"])
@@ -169,7 +160,7 @@ def select_train_samples_by_coarse_type(coarse_types: list[str]) -> list[dict]:
         expr_parts = [f'coarse_type_set like "%{ctype}%"' for ctype in types]
         expr = " or ".join(expr_parts)
         
-        filtered_results: list = collection_v4.query(
+        filtered_results: list = collection.query(
             expr=expr,
             output_fields=["id", "entities", "coarse_types", "coarse_type_set", "sentence"]
         )
