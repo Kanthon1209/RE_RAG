@@ -55,6 +55,7 @@ async def search_v3(request: Request):
     limit = body.get("limit", 50)
     methods = ["default", "coarse_only", "type_first", "name_first", "mix", "rerank", "rerank-0.6b", "rerank-4b", "rerank-8b"]
     method = body.get("method", "default")
+    domain = body.get("domain", "")
     reserve_empty = body.get("reserve_empty", limit) # 默认不删除
     test_coarse_types: list[str] = body.get("coarse_type", [])
 
@@ -139,7 +140,7 @@ async def search_v3(request: Request):
                 "rerank-8b": "Qwen3-Reranker-8B",
             }
             model_name = method_model_map[method]
-            reranked_scores = rerank(query=query_text, docs=[json.dumps({"sentence": item['sentence'], "entities": item["entities"]}) for item in hits_list], model_name=model_name)
+            reranked_scores = rerank(query=f'Domain: {domain}, Sentence: {query_text}, detected_coarse_types: {test_coarse_types}', docs=[json.dumps({"sentence": item['sentence'], "entities": item["entities"]}) for item in hits_list], model_name=model_name)
             for idx, item in enumerate(hits_list):
                 item['rerank_score'] = reranked_scores[idx]
             hits_list.sort(key = lambda x: -x["rerank_score"])

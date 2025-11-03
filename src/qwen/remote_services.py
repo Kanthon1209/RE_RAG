@@ -1,6 +1,8 @@
-import http.client
-import json
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import logging
+import json
 from typing import Union, List
 
 class Client:
@@ -9,97 +11,66 @@ class Client:
     """
 
     def __init__(self, host: str = "127.0.0.1", port: int = 12138):
-        self.host = host
-        self.port = port
-        self.conn = None
-        self.headers = {"Content-Type": "application/json"} # 持久连接和 FastAPI 放到一起会出问题, 有空看一下错误的原因
+        self.base_url = f"http://{host}:{port}"
         self.logger = logging.getLogger(__name__)
-        self._connect()
+        self.session = self._init_session()
 
-    def _connect(self):
-        """建立 HTTP 连接"""
-        if self.conn:
-            try:
-                self.conn.close()
-            except:
-                pass
-        self.conn = http.client.HTTPConnection(self.host, self.port, timeout=60)
-        self.logger.info(f"[EmbeddingClient] Connected to {self.host}:{self.port}")
-
-    def _reconnect(self):
-        """自动重连"""
-        self.logger.warning("[EmbeddingClient] Connection lost, reconnecting...")
-        self._connect()
+    def _init_session(self):
+        """初始化带连接池和重试机制的 HTTP 会话"""
+        session = requests.Session()
+        retries = Retry(
+            total=3,                   # 总重试次数
+            backoff_factor=0.5,        # 指数退避系数
+            status_forcelist=[502, 503, 504],
+            allowed_methods=["POST"]
+        )
+        adapter = HTTPAdapter(pool_connections=10, pool_maxsize=50, max_retries=retries)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        return session
 
     def embed(self, texts: Union[str, List[str]]):
-        """
-        发送文本或文本列表到 /qwen3_embedding 接口，返回嵌入向量。
-        """
+        """发送文本或文本列表到 /qwen3_embedding 接口"""
         if isinstance(texts, str):
             texts = [texts]
 
-        payload = json.dumps({"texts": texts})
-
+        payload = {"texts": texts}
         try:
-            self.conn.request("POST", "/qwen3_embedding", body=payload, headers=self.headers)
-            res = self.conn.getresponse()
-            data = res.read()
-
-            if res.status != 200:
-                raise Exception(f"Server returned {res.status}: {data.decode('utf-8')}")
-
-            return json.loads(data.decode("utf-8"))
-
-        except (http.client.RemoteDisconnected, ConnectionResetError, BrokenPipeError) as e:
-            # 连接断开时自动重连并重试
-            self.logger.warning(f"[EmbeddingClient] Lost connection: {e}, reconnecting...")
-            self._reconnect()
-            return self.embed(texts)
+            resp = self.session.post(
+                f"{self.base_url}/qwen3_embedding",
+                json=payload,
+                timeout=(5, 30)  # (连接超时, 响应超时)
+            )
+            resp.raise_for_status()
+            return resp.json()
 
         except Exception as e:
-            self.logger.error(f"[EmbeddingClient Error] {e}")
+            self.logger.error(f"[EmbeddingClient] Error calling embedding API: {e}")
             return None
-        
-    def rerank(self, query: str, docs: list[str], model_name: str = "Qwen3-Reranker-4B") -> list[float]:
-        """
-        发送 query 及 docs 到远程部署的 qwen3 rerank API 接口
-        """
-        # 验证参数合法性
-        if not isinstance(query, str):
-            raise Exception("rerank query should be str")
-        if not isinstance(docs, list):
-            raise Exception("rerank docs should be list[str]")
 
-        payload = json.dumps({"query": query, "docs": docs, "model_name": model_name})
+    def rerank(self, query: str, docs: list[str], model_name: str = "Qwen3-Reranker-4B"):
+        """发送 query + docs 到 /qwen_rerank 接口"""
+        payload = {
+            "query": query,
+            "docs": docs,
+            "model_name": model_name
+        }
 
         try:
-            self.conn.request("POST", "/qwen_rerank", body=payload, headers=self.headers)
-            res = self.conn.getresponse()
-            data = res.read()
-
-            if res.status != 200:
-                raise Exception(f"Server returned {res.status}: {data.decode('utf-8')}")
-
-            return json.loads(data.decode("utf-8"))
-
-        except (http.client.RemoteDisconnected, ConnectionResetError, BrokenPipeError) as e:
-            # 连接断开时自动重连并重试
-            self.logger.warning(f"[Client] Lost connection: {e}, reconnecting...")
-            self._reconnect()
-            return self.rerank(query=query, docs=docs, model_name=model_name)
+            resp = self.session.post(
+                f"{self.base_url}/qwen_rerank",
+                json=payload,
+                timeout=(3, 60)
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("scores", [])
 
         except Exception as e:
-            self.logger.error(f"[Client Error] {e}")
-            return None
+            self.logger.error(f"[RerankClient] Error calling rerank API: {e}")
+            return []
 
     def close(self):
-        """关闭 HTTP 连接"""
-        if self.conn:
-            self.conn.close()
-            self.logger.info("[Client] Connection closed.")
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        """关闭连接池"""
+        self.session.close()
+        self.logger.info("[Client] Session closed.")
